@@ -35,10 +35,9 @@ export async function PUT(
         { returnDocument: ReturnDocument.AFTER }
       );
 
-    if (!result.value) {
+    if (!result || !result.value) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
-
     const t = result.value as any;
     return NextResponse.json({
       id: t._id.toString(),
@@ -50,7 +49,10 @@ export async function PUT(
     });
   } catch (err) {
     console.error("PUT /api/tasks/[id] error:", err);
-    return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to update task" },
+      { status: 500 }
+    );
   }
 }
 
@@ -77,6 +79,9 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("DELETE /api/tasks/[id] error:", err);
-    return NextResponse.json({ error: "Failed to delete task" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to delete task" },
+      { status: 500 }
+    );
   }
 }
