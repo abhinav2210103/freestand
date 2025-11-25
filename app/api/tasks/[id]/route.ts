@@ -1,6 +1,6 @@
 // app/api/tasks/[id]/route.ts
 import { NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/mongodb";
+import { connectToDatabase } from "@/app/lib/mongodb";
 import { ObjectId, ReturnDocument } from "mongodb";
 
 type ColumnKey = "pending" | "working" | "completed" | "verified" | "deleted";
