@@ -20,13 +20,15 @@ interface Task {
   assignedTo: string;
 }
 
+type TasksByColumn = Record<ColumnKey, Task[]>;
+
 function Page() {
   const [openModal, setOpenModal] = useState(false);
   const [modalMode, setModalMode] = useState<"add" | "edit">("add");
   const [activeColumn, setActiveColumn] = useState<ColumnKey>("pending");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
-  const [tasks, setTasks] = useState<Record<ColumnKey, Task[]>>({
+  const [tasks, setTasks] = useState<TasksByColumn>({
     pending: [],
     working: [],
     completed: [],
@@ -34,143 +36,248 @@ function Page() {
     deleted: [],
   });
 
-  const generateId = () => {
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-      return crypto.randomUUID();
-    }
-    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  };
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load from localStorage
+  // ✅ Fetch tasks from API on mount
   useEffect(() => {
-    const saved = localStorage.getItem("tasks");
-    if (saved) {
-      const parsed = JSON.parse(saved);
+    const fetchTasks = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-      const addIds = (list: any[] = []): Task[] =>
-        list.map((t) => ({
-          id: t.id || generateId(),
-          name: t.name,
-          description: t.description,
-          assignedBy: t.assignedBy,
-          assignedTo: t.assignedTo,
-        }));
+        console.log("[FETCH TASKS] Hitting /api/tasks ...");
+        const res = await fetch("/api/tasks");
 
-      setTasks({
-        pending: addIds(parsed.pending || []),
-        working: addIds(parsed.working || []),
-        completed: addIds(parsed.completed || []),
-        verified: addIds(parsed.verified || []),
-        deleted: addIds(parsed.deleted || []),
-      });
-    }
+        console.log("[FETCH TASKS] Response received", {
+          ok: res.ok,
+          status: res.status,
+          statusText: res.statusText,
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          console.error("[FETCH TASKS] Non-OK response body:", text);
+          throw new Error(`Failed to fetch tasks: ${res.status} ${res.statusText}`);
+        }
+
+        const data: TasksByColumn = await res.json();
+        console.log("[FETCH TASKS] Parsed JSON:", data);
+
+        setTasks(data);
+      } catch (err: any) {
+        console.error("[FETCH TASKS] Error loading tasks:", err);
+        setError(err.message || "Failed to load tasks");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTasks();
   }, []);
 
-  // Save on change
-  useEffect(() => {
-    localStorage.setItem("tasks", JSON.stringify(tasks));
-  }, [tasks]);
-
   const handleModalSubmit = (taskInput: any, newColumn?: ColumnKey) => {
-    if (modalMode === "add") {
-      const newTask: Task = {
-        id: generateId(),
-        name: taskInput.name,
-        description: taskInput.description,
-        assignedBy: taskInput.assignedBy,
-        assignedTo: taskInput.assignedTo,
-      };
+    (async () => {
+      if (modalMode === "add") {
+        const status = activeColumn;
 
-      setTasks((prev) => ({
-        ...prev,
-        [activeColumn]: [...prev[activeColumn], newTask],
-      }));
-    } else if (modalMode === "edit" && editingTaskId) {
-      setTasks((prev) => {
-        const currentColumn = activeColumn;
-        const targetColumn = newColumn || currentColumn;
-
-        const updated = { ...prev };
-
-        if (currentColumn === targetColumn) {
-          updated[currentColumn] = prev[currentColumn].map((t) =>
-            t.id === editingTaskId
-              ? {
-                  ...t,
-                  name: taskInput.name,
-                  description: taskInput.description,
-                  assignedBy: taskInput.assignedBy,
-                  assignedTo: taskInput.assignedTo,
-                }
-              : t
-          );
-        } else {
-          updated[currentColumn] = prev[currentColumn].filter(
-            (t) => t.id !== editingTaskId
-          );
-
-          const movedTask: Task = {
-            id: editingTaskId,
+        try {
+          console.log("[CREATE TASK] Sending POST /api/tasks with body:", {
             name: taskInput.name,
             description: taskInput.description,
             assignedBy: taskInput.assignedBy,
             assignedTo: taskInput.assignedTo,
+            status,
+          });
+
+          const res = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: taskInput.name,
+              description: taskInput.description,
+              assignedBy: taskInput.assignedBy,
+              assignedTo: taskInput.assignedTo,
+              status,
+            }),
+          });
+
+          console.log("[CREATE TASK] Response:", {
+            ok: res.ok,
+            status: res.status,
+            statusText: res.statusText,
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            console.error("[CREATE TASK] Non-OK response body:", text);
+            throw new Error("Failed to create task");
+          }
+
+          const created: any = await res.json();
+          console.log("[CREATE TASK] Created task from server:", created);
+
+          const newTask: Task = {
+            id: created.id,
+            name: created.name,
+            description: created.description,
+            assignedBy: created.assignedBy,
+            assignedTo: created.assignedTo,
           };
 
-          updated[targetColumn] = [...prev[targetColumn], movedTask];
+          setTasks((prev) => ({
+            ...prev,
+            [status]: [...prev[status], newTask],
+          }));
+        } catch (err) {
+          console.error("[CREATE TASK] Error:", err);
         }
+      } else if (modalMode === "edit" && editingTaskId) {
+        const currentColumn = activeColumn;
+        const targetColumn = newColumn || currentColumn;
 
-        return updated;
-      });
-    }
+        try {
+          console.log("[UPDATE TASK] Sending PUT /api/tasks/" + editingTaskId, {
+            body: {
+              name: taskInput.name,
+              description: taskInput.description,
+              assignedBy: taskInput.assignedBy,
+              assignedTo: taskInput.assignedTo,
+              status: targetColumn,
+            },
+          });
 
-    setOpenModal(false);
-    setEditingTaskId(null);
+          const res = await fetch(`/api/tasks/${editingTaskId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: taskInput.name,
+              description: taskInput.description,
+              assignedBy: taskInput.assignedBy,
+              assignedTo: taskInput.assignedTo,
+              status: targetColumn,
+            }),
+          });
+
+          console.log("[UPDATE TASK] Response:", {
+            ok: res.ok,
+            status: res.status,
+            statusText: res.statusText,
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            console.error("[UPDATE TASK] Non-OK response body:", text);
+            throw new Error("Failed to update task");
+          }
+
+          const updated: any = await res.json();
+          console.log("[UPDATE TASK] Updated task from server:", updated);
+
+          const updatedTask: Task = {
+            id: updated.id,
+            name: updated.name,
+            description: updated.description,
+            assignedBy: updated.assignedBy,
+            assignedTo: updated.assignedTo,
+          };
+
+          setTasks((prev) => {
+            const next: TasksByColumn = {
+              pending: [],
+              working: [],
+              completed: [],
+              verified: [],
+              deleted: [],
+            };
+
+            (Object.keys(prev) as ColumnKey[]).forEach((col) => {
+              // remove from all columns
+              next[col] = prev[col].filter((t) => t.id !== editingTaskId);
+            });
+
+            // add into target column
+            next[targetColumn] = [...next[targetColumn], updatedTask];
+
+            return next;
+          });
+        } catch (err) {
+          console.error("[UPDATE TASK] Error:", err);
+        }
+      }
+
+      setOpenModal(false);
+      setEditingTaskId(null);
+    })();
   };
 
   const openAddModal = (col: ColumnKey) => {
+    console.log("[UI] Open add modal for column:", col);
     setModalMode("add");
     setActiveColumn(col);
     setOpenModal(true);
   };
 
   const openEditModal = (col: ColumnKey, taskId: string) => {
+    console.log("[UI] Open edit modal", { column: col, taskId });
     setModalMode("edit");
     setActiveColumn(col);
     setEditingTaskId(taskId);
     setOpenModal(true);
   };
 
-  // 🔥 DRAG LOGIC HERE
+  // ✅ DRAG logic + persist column change via API
   const onDragEnd = (result: DropResult) => {
+    console.log("[DRAG END] Result:", result);
+
     const { source, destination } = result;
 
-    if (!destination) return;
+    if (!destination) {
+      console.log("[DRAG END] No destination, aborting.");
+      return;
+    }
 
     const sourceCol = source.droppableId as ColumnKey;
     const destCol = destination.droppableId as ColumnKey;
 
     // nothing changed
-    if (
-      sourceCol === destCol &&
-      source.index === destination.index
-    ) {
+    if (sourceCol === destCol && source.index === destination.index) {
+      console.log("[DRAG END] Same position, no change.");
       return;
     }
 
+    const movedTask = tasks[sourceCol][source.index];
+    if (!movedTask) {
+      console.warn("[DRAG END] No movedTask found at source index.", {
+        sourceCol,
+        sourceIndex: source.index,
+      });
+      return;
+    }
+
+    console.log("[DRAG END] Moving task:", {
+      taskId: movedTask.id,
+      from: sourceCol,
+      to: destCol,
+      destIndex: destination.index,
+    });
+
+    // Update UI immediately
     setTasks((prev) => {
       const sourceTasks = Array.from(prev[sourceCol]);
       const destTasks =
-        sourceCol === destCol
-          ? sourceTasks
-          : Array.from(prev[destCol]);
+        sourceCol === destCol ? sourceTasks : Array.from(prev[destCol]);
 
       // remove from source
-      const [moved] = sourceTasks.splice(source.index, 1);
+      const [removed] = sourceTasks.splice(source.index, 1);
+      if (!removed) {
+        console.warn("[DRAG END] Nothing removed from sourceTasks.");
+        return prev;
+      }
 
       if (sourceCol === destCol) {
         // reorder in same column
-        destTasks.splice(destination.index, 0, moved);
+        destTasks.splice(destination.index, 0, removed);
 
         return {
           ...prev,
@@ -178,7 +285,7 @@ function Page() {
         };
       } else {
         // move to another column
-        destTasks.splice(destination.index, 0, moved);
+        destTasks.splice(destination.index, 0, removed);
 
         return {
           ...prev,
@@ -187,6 +294,35 @@ function Page() {
         };
       }
     });
+
+    // Persist new status in DB
+    (async () => {
+      try {
+        console.log("[DRAG END] Persisting status via PUT /api/tasks/" + movedTask.id, {
+          status: destCol,
+        });
+
+        const res = await fetch(`/api/tasks/${movedTask.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: destCol }),
+        });
+
+        console.log("[DRAG END] Persist response:", {
+          ok: res.ok,
+          status: res.status,
+          statusText: res.statusText,
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          console.error("[DRAG END] Persist non-OK body:", text);
+        }
+      } catch (err) {
+        console.error("[DRAG END] Failed to update task status", err);
+        // optional: you could refetch /api/tasks here to resync
+      }
+    })();
   };
 
   const renderColumn = (title: string, col: ColumnKey) => (
@@ -196,7 +332,9 @@ function Page() {
           ref={provided.innerRef}
           {...provided.droppableProps}
           className={`bg-white border rounded-2xl p-5 flex flex-col min-h-[500px] shadow-sm transition-all duration-200 ${
-            snapshot.isDraggingOver ? "shadow-lg ring-2 ring-[#0A2A66]/40" : "hover:shadow-md"
+            snapshot.isDraggingOver
+              ? "shadow-lg ring-2 ring-[#0A2A66]/40"
+              : "hover:shadow-md"
           }`}
         >
           <h2 className="text-lg font-bold text-[#0A2A66] mb-4 tracking-wide uppercase">
@@ -211,11 +349,7 @@ function Page() {
             )}
 
             {tasks[col].map((task, index) => (
-              <Draggable
-                key={task.id}
-                draggableId={task.id}
-                index={index}
-              >
+              <Draggable key={task.id} draggableId={task.id} index={index}>
                 {(provided, snapshot) => (
                   <div
                     ref={provided.innerRef}
@@ -276,6 +410,17 @@ function Page() {
       <Navbar deletedTasks={tasks.deleted} />
 
       <div className="bg-gray-50 min-h-screen pb-10">
+        {loading && (
+          <div className="max-w-7xl mx-auto px-6 pt-10 text-gray-500">
+            Loading tasks...
+          </div>
+        )}
+        {error && (
+          <div className="max-w-7xl mx-auto px-6 pt-4 text-red-500 text-sm">
+            {error}
+          </div>
+        )}
+
         <DragDropContext onDragEnd={onDragEnd}>
           <div className="max-w-7xl mx-auto px-6 py-10 grid grid-cols-4 gap-6">
             {renderColumn("Pending", "pending")}
