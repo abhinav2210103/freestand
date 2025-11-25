@@ -1,7 +1,6 @@
 // app/api/tasks/route.ts
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/app/lib/mongodb";
-import { ObjectId } from "mongodb";
 
 type ColumnKey = "pending" | "working" | "completed" | "verified" | "deleted";
 
@@ -32,11 +31,11 @@ function groupTasks(tasks: Task[]): TaskColumns {
 }
 
 // GET /api/tasks
+// GET /api/tasks
 export async function GET() {
   try {
-    const { db } = await connectToDatabase();
+    const db = await connectToDatabase();
     const docs = await db.collection("tasks").find().toArray();
-
     const tasks: Task[] = docs.map((d: any) => ({
       id: d._id.toString(),
       name: d.name,
@@ -54,6 +53,7 @@ export async function GET() {
 }
 
 // POST /api/tasks
+// POST /api/tasks
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -64,8 +64,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
 
-    const { db } = await connectToDatabase();
-
+    const db = await connectToDatabase();
     const result = await db.collection("tasks").insertOne({
       name,
       description,
