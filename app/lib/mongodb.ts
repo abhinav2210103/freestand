@@ -1,28 +1,18 @@
 // lib/mongodb.ts
-import { MongoClient, Db } from "mongodb";
+import { MongoClient } from "mongodb";
 
-const uri = process.env.MONGODB_URI!;
-const dbName = process.env.MONGODB_DB!;
+const uri = process.env.MONGODB_URI;
 
 if (!uri) {
-  throw new Error("Please define the MONGODB_URI environment variable in .env.local");
-}
-if (!dbName) {
-  throw new Error("Please define the MONGODB_DB environment variable in .env.local");
+  throw new Error("⚠️ Missing MONGODB_URI in .env.local");
 }
 
-let cachedClient: MongoClient | null = null;
-let cachedDb: Db | null = null;
+let client: MongoClient | null = null;
 
 export async function connectToDatabase() {
-  if (cachedClient && cachedDb) {
-    return { client: cachedClient, db: cachedDb };
+  if (!client) {
+    client = await MongoClient.connect(uri!);
   }
 
-  const client = await MongoClient.connect(uri);
-  const db = client.db(dbName);
-
-  cachedClient = client;
-  cachedDb = db;
-  return { client, db };
+  return client.db();
 }
