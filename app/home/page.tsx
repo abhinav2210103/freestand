@@ -18,6 +18,7 @@ interface Task {
   description: string;
   assignedBy: string;
   assignedTo: string;
+  status: ColumnKey; 
 }
 
 type TasksByColumn = Record<ColumnKey, Task[]>;
@@ -63,6 +64,18 @@ function Page() {
 
         const data: TasksByColumn = await res.json();
         console.log("[FETCH TASKS] Parsed JSON:", data);
+
+        // 👇 log every task id so we can check if they look like ObjectIds
+        (Object.keys(data) as ColumnKey[]).forEach((col) => {
+          data[col].forEach((t) => {
+            console.log("[FETCH TASKS] Task from API:", {
+              column: col,
+              id: t.id,
+              typeofId: typeof t.id,
+              status: t.status,
+            });
+          });
+        }); // 👈
 
         setTasks(data);
       } catch (err: any) {
@@ -123,6 +136,7 @@ function Page() {
             description: created.description,
             assignedBy: created.assignedBy,
             assignedTo: created.assignedTo,
+            status: created.status as ColumnKey, // 👈 keep status from server
           };
 
           setTasks((prev) => ({
@@ -136,8 +150,23 @@ function Page() {
         const currentColumn = activeColumn;
         const targetColumn = newColumn || currentColumn;
 
+        // 🔥 extra logs for update
+        console.log("[UPDATE TASK] editingTaskId BEFORE fetch:", {
+          editingTaskId,
+          typeofId: typeof editingTaskId,
+        }); // 👈
+
+        const taskFromState = tasks[currentColumn].find(
+          (t) => t.id === editingTaskId
+        );
+        console.log("[UPDATE TASK] Task object from state:", taskFromState); // 👈
+
+        const url = `/api/tasks/${editingTaskId}`;
+        console.log("[UPDATE TASK] Request URL:", url); // 👈
+
         try {
-          console.log("[UPDATE TASK] Sending PUT /api/tasks/" + editingTaskId, {
+          console.log("[UPDATE TASK] Sending PUT", {
+            url,
             body: {
               name: taskInput.name,
               description: taskInput.description,
@@ -147,7 +176,7 @@ function Page() {
             },
           });
 
-          const res = await fetch(`/api/tasks/${editingTaskId}`, {
+          const res = await fetch(url, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -180,6 +209,7 @@ function Page() {
             description: updated.description,
             assignedBy: updated.assignedBy,
             assignedTo: updated.assignedTo,
+            status: updated.status as ColumnKey, // 👈 make sure we keep status
           };
 
           setTasks((prev) => {
@@ -226,7 +256,6 @@ function Page() {
     setOpenModal(true);
   };
 
-  // ✅ DRAG logic + persist column change via API
   const onDragEnd = (result: DropResult) => {
     console.log("[DRAG END] Result:", result);
 
@@ -257,18 +286,17 @@ function Page() {
 
     console.log("[DRAG END] Moving task:", {
       taskId: movedTask.id,
+      typeofId: typeof movedTask.id,
       from: sourceCol,
       to: destCol,
       destIndex: destination.index,
-    });
+    }); // 👈
 
-    // Update UI immediately
     setTasks((prev) => {
       const sourceTasks = Array.from(prev[sourceCol]);
       const destTasks =
         sourceCol === destCol ? sourceTasks : Array.from(prev[destCol]);
 
-      // remove from source
       const [removed] = sourceTasks.splice(source.index, 1);
       if (!removed) {
         console.warn("[DRAG END] Nothing removed from sourceTasks.");
@@ -276,7 +304,7 @@ function Page() {
       }
 
       if (sourceCol === destCol) {
-        // reorder in same column
+        // reorder in same column (status stays same)
         destTasks.splice(destination.index, 0, removed);
 
         return {
@@ -284,8 +312,12 @@ function Page() {
           [sourceCol]: destTasks,
         };
       } else {
-        // move to another column
-        destTasks.splice(destination.index, 0, removed);
+        const updatedRemoved: Task = {
+          ...removed,
+          status: destCol,
+        };
+
+        destTasks.splice(destination.index, 0, updatedRemoved);
 
         return {
           ...prev,
@@ -295,14 +327,12 @@ function Page() {
       }
     });
 
-    // Persist new status in DB
     (async () => {
       try {
-        console.log("[DRAG END] Persisting status via PUT /api/tasks/" + movedTask.id, {
-          status: destCol,
-        });
+        const url = `/api/tasks/${movedTask.id}`;
+        console.log("[DRAG END] Persist URL:", url); // 👈
 
-        const res = await fetch(`/api/tasks/${movedTask.id}`, {
+        const res = await fetch(url, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: destCol }),
@@ -320,7 +350,6 @@ function Page() {
         }
       } catch (err) {
         console.error("[DRAG END] Failed to update task status", err);
-        // optional: you could refetch /api/tasks here to resync
       }
     })();
   };

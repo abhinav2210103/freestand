@@ -1,4 +1,3 @@
-// app/api/tasks/route.ts
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/app/lib/mongodb";
 
@@ -25,16 +24,16 @@ function groupTasks(tasks: Task[]): TaskColumns {
   };
 
   return tasks.reduce((acc, t) => {
-    acc[t.status].push(t);
+    const status: ColumnKey = (t.status || "pending") as ColumnKey; // 👈 safe fallback
+    acc[status].push(t);
     return acc;
   }, initial);
 }
 
 // GET /api/tasks
-// GET /api/tasks
 export async function GET() {
   try {
-    const db = await connectToDatabase();
+    const { db } = await connectToDatabase();
     const docs = await db.collection("tasks").find().toArray();
     const tasks: Task[] = docs.map((d: any) => ({
       id: d._id.toString(),
@@ -42,7 +41,7 @@ export async function GET() {
       description: d.description,
       assignedBy: d.assignedBy,
       assignedTo: d.assignedTo,
-      status: d.status as ColumnKey,
+      status: (d.status || "pending") as ColumnKey, // 👈 ensure status
     }));
 
     return NextResponse.json(groupTasks(tasks));
@@ -52,7 +51,6 @@ export async function GET() {
   }
 }
 
-// POST /api/tasks
 // POST /api/tasks
 export async function POST(request: Request) {
   try {
@@ -64,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
 
-    const db = await connectToDatabase();
+    const { db } = await connectToDatabase();
     const result = await db.collection("tasks").insertOne({
       name,
       description,
